@@ -1,0 +1,69 @@
+---
+version: '3.4'
+
+## Nexcloud mount points
+
+x-nc-web-volumes: &nc-web-volumes
+  - nextcloud_app:/var/www/html
+  - /srv/nextcloud/custom_apps:/var/www/html/custom_apps
+  - /srv/nextcloud/config:/var/www/html/config
+  - /srv/nextcloud/data:/var/www/html/data
+
+services:
+
+##
+## Nextcloud
+##
+
+  nc_db:
+    environment:
+      MYSQL_ROOT_PASSWORD: ${NEXTCLOUD_MYSQL_ROOT_PASSWORD:-password}
+      MYSQL_PASSWORD: ${NEXTCLOUD_MYSQL_PASSWORD:-password}
+
+
+  nc_cron:
+    volumes: *nc-web-volumes
+
+  futhark:
+    volumes: *nc-web-volumes
+    environment:
+      NEXTCLOUD_ADMIN_PASSWORD: ${NEXTCLOUD_ADMIN_PASSWORD:-password}
+      NEXTCLOUD_ADMIN_USER: ${NEXTCLOUD_ADMIN_USER:-admin}
+      MYSQL_PASSWORD: ${NEXTCLOUD_MYSQL_PASSWORD:-password}
+
+##
+## Gitlab
+##
+
+  git:
+    volumes:
+      - /srv/gitlab/config:/etc/gitlab
+      - gitlab_logs:/var/log/gitlab
+      - gitlab_data:/var/opt/gitlab
+      - ${BACKUP_PATH}:/var/opt/gitlab/backups
+
+  gitlab-runner:
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /srv/gitlab-runner:/etc/gitlab-runner
+
+##
+## Munin
+##
+
+  munin:
+    volumes:
+      - munin_data:/var/lib/munin
+      - /srv/munin/conf:/etc/munin/munin-conf.d
+      - /srv/munin/plugin_conf:/etc/munin/plugin-conf.d
+
+##
+## Watchtower
+##
+
+  watchtower:
+    environment:
+      TZ: ${WATCHTOWER_TZ:-UTC}
+
+      # FIXME: Create application in gotify and change the token, recreate watchtower.
+      WATCHTOWER_NOTIFICATION_GOTIFY_TOKEN: ${WATCHTOWER_NOTIFICATION_GOTIFY_TOKEN:-changeme}

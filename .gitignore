@@ -1,0 +1,13 @@
+# Ingore development environment
+*log
+.vagrant
+
+# Ignore temporary files
+*.swp
+*.bak
+
+# Ignore own container customizations
+!docker-compose.override.yml
+!.env.template
+docker-compose.*.yml
+.env*

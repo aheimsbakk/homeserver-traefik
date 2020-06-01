@@ -1,0 +1,347 @@
+---
+version: '3.4'
+
+## Container defaults
+
+x-defaults: &defaults
+  restart: unless-stopped
+  logging:
+    driver: journald
+  labels:
+    com.centurylinklabs.watchtower.enable: "true"
+
+## Defaults for Nextcloud
+
+x-nc-mysql-defaults: &nc-mysql-defaults
+  MYSQL_DATABASE: nextcloud
+  MYSQL_HOST: nc_db
+  MYSQL_USER: nextcloud
+  MYSQL_PASSWORD: password
+
+## Nexcloud mount points
+
+x-nc-web-volumes: &nc-web-volumes
+  - nextcloud_app:/var/www/html
+  - nextcloud_custom_apps:/var/www/html/custom_apps
+  - nextcloud_config:/var/www/html/config
+  - nextcloud_data:/var/www/html/data
+
+networks:
+  net-dmz:
+  net-docker:
+  net-gitlab-runner:
+  net-nextcloud:
+
+volumes:
+  gitlab_backup:
+  gitlab_config:
+  gitlab_data:
+  gitlab_logs:
+  gitlab_runner_conf:
+  gotify_data:
+  munin_conf:
+  munin_data:
+  munin_plugin_conf:
+  nextcloud_app:
+  nextcloud_config:
+  nextcloud_custom_apps:
+  nextcloud_data:
+  nextcloud_db:
+  traefik_acme_data:
+
+services:
+
+##
+## Nextcloud
+##
+
+  nc_db:
+    <<: *defaults
+    image: mariadb:10
+    command: --transaction-isolation=READ-COMMITTED --binlog-format=ROW
+    volumes:
+      - nextcloud_db:/var/lib/mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      <<: *nc-mysql-defaults
+    networks:
+      net-nextcloud:
+
+  nc_redis:
+    <<: *defaults
+    image: redis:alpine
+    networks:
+      net-nextcloud:
+
+  nc_cron:
+    <<: *defaults
+    image: nextcloud:18-apache
+    volumes: *nc-web-volumes
+    entrypoint: /cron.sh
+    depends_on:
+      - futhark
+    networks:
+      net-nextcloud:
+
+  futhark:
+    <<: *defaults
+    image: nextcloud:18-apache
+    volumes: *nc-web-volumes
+    environment:
+      <<: *nc-mysql-defaults
+      NEXTCLOUD_ADMIN_PASSWORD: password
+      NEXTCLOUD_ADMIN_USER: admin
+      NEXTCLOUD_DATA_DIR: /var/www/html/data
+      NEXTCLOUD_TABLE_PREFIX: oc_
+      NEXTCLOUD_UPDATE: 1
+      NEXTCLOUD_TRUSTED_DOMAINS: "futhark.${DOMAIN:-10.0.0.10.xip.io}"
+      TRUSTED_PROXIES: 172.16.0.0/12
+      REDIS_HOST: nc_redis
+    depends_on:
+      - nc_db
+      - nc_redis
+    networks:
+      net-dmz:
+      net-nextcloud:
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.middlewares.nextcloud-redirect.redirectregex.regex=^https://(.*)/.well-known/(card|cal)dav"
+      - "traefik.http.middlewares.nextcloud-redirect.redirectregex.replacement=https://$${1}/remote.php/dav/"
+      - "traefik.http.middlewares.nextcloud-redirect.redirectregex.permanent=true"
+      - "traefik.http.services.nextcloud.loadbalancer.server.port=80"
+      - "traefik.http.routers.nextcloud.entrypoints=websecure"
+      - "traefik.http.routers.nextcloud.service=nextcloud"
+      - "traefik.http.routers.nextcloud.middlewares=nextcloud-redirect"
+
+##
+## Gitlab
+##
+
+  git:
+    <<: *defaults
+    image: gitlab/gitlab-ce:latest
+    volumes:
+      - gitlab_config:/etc/gitlab
+      - gitlab_logs:/var/log/gitlab
+      - gitlab_data:/var/opt/gitlab
+      - gitlab_backup:/var/opt/gitlab/backups
+    environment:
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url "https://gitlab.${DOMAIN:-10.0.0.10.xip.io}"
+        registry_external_url "http://registry.${DOMAIN:-10.0.0.10.xip.io}:5487"
+        nginx['listen_https'] = false
+        nginx['listen_port'] = 80
+        gitlab_rails['time_zone'] = 'UTC'
+        gitlab_rails['gitlab_ssh_host'] = "gitlab.${DOMAIN:-10.0.0.10.xip.io}:2222"
+        gitlab_rails['registry_enabled'] = true
+        gitlab_rails['registry_host'] = "registry.${DOMAIN:-10.0.0.10.xip.io}"
+        gitlab_rails['registry_port'] = "5487"
+        gitlab_rails['registry_path'] = "/var/opt/gitlab/gitlab-rails/shared/registry"
+        registry_nginx['enable'] = true
+        registry_nginx['proxy_set_headers'] = {
+          "Host" => "$$http_host",
+          "X-Real-IP" => "$$remote_addr",
+          "X-Forwarded-For" => "$$proxy_add_x_forwarded_for",
+          "X-Forwarded-Proto" => "https",
+          "X-Forwarded-Ssl" => "on"
+        }
+    networks:
+      net-dmz:
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.gitlab.loadbalancer.server.port=80"
+      - "traefik.http.routers.gitlab.entrypoints=websecure"
+      - "traefik.http.routers.gitlab.service=gitlab"
+      # Give registry it's own name
+      - "traefik.http.services.registry.loadbalancer.server.port=5487"
+      - "traefik.http.routers.registry.rule=Host(`registry.${DOMAIN:-10.0.0.10.xip.io}`)"
+      - "traefik.http.routers.registry.entrypoints=registrysecure"
+      - "traefik.http.routers.registry.service=registry"
+      # Proxy SSH
+      - "traefik.tcp.services.gitlab-ssh.loadbalancer.server.port=22"
+      - "traefik.tcp.services.gitlab-ssh.loadbalancer.terminationdelay=7200"
+      - "traefik.tcp.routers.gitlab-ssh.rule=HostSNI(`*`)"
+      - "traefik.tcp.routers.gitlab-ssh.tls=false"
+      - "traefik.tcp.routers.gitlab-ssh.entrypoints=port2222"
+      - "traefik.tcp.routers.gitlab-ssh.service=gitlab-ssh"
+
+  gitlab-runner:
+    <<: *defaults
+    image: gitlab/gitlab-runner:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - gitlab_runner_conf:/etc/gitlab-runner
+    networks:
+      net-gitlab-runner:
+
+##
+## Gotify
+##
+
+  gotify:
+    <<: *defaults
+    image: gotify/server:2.0
+    environment:
+      GOTIFY_SERVER_PORT: '80'
+      GOTIFY_DATABASE_DIALECT: sqlite3
+      GOTIFY_DATABASE_CONNECTION: /data/gotify.db
+      GOTIFY_DEFAULTUSER_NAME: admin
+      GOTIFY_DEFAULTUSER_PASS: password
+      GOTIFY_PASSSTRENGTH: '16'
+      GOTIFY_UPLOADEDIMAGESDIR: /data/images
+      GOTIFY_PLUGINSDIR: /data/plugins
+      GOTIFY_SERVER_RESPONSEHEADERS: "Access-Control-Allow-Origin: \"*\"\nAccess-Control-Allow-Methods: \"GET,POST\""
+    networks:
+      net-dmz:
+    volumes:
+      - gotify_data:/data
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.gotify.loadbalancer.server.port=80"
+      - "traefik.http.routers.gotify.entrypoints=websecure"
+      - "traefik.http.routers.gotify.service=gotify"
+
+##
+## Munin
+##
+
+  munin:
+    <<: *defaults
+    image: aheimsbakk/munin-alpine
+    volumes:
+      - munin_data:/var/lib/munin
+      - munin_conf:/etc/munin/munin-conf.d
+      - munin_plugin_conf:/etc/munin/plugin-conf.d
+    environment:
+      NODES:
+      SMTP_NODES:
+    networks:
+      net-dmz:
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.middlewares.munin-redirect.redirectregex.regex=^(.+)://([^/]+)/$$"
+      - "traefik.http.middlewares.munin-redirect.redirectregex.replacement=$${1}://$${2}/munin/"
+      - "traefik.http.services.munin.loadbalancer.server.port=80"
+      - "traefik.http.routers.munin.entrypoints=websecure"
+      - "traefik.http.routers.munin.service=munin"
+      - "traefik.http.routers.munin.middlewares=private-ip-ranges,munin-redirect"
+
+##
+## Watchtower
+##
+
+  watchtower:
+    <<: *defaults
+    image: containrrr/watchtower
+    command: -i 3600 --label-enable
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      # Notifications won't work until you have a valid certificate on gotify
+      WATCHTOWER_NOTIFICATIONS: gotify
+      WATCHTOWER_NOTIFICATION_GOTIFY_URL: https://gotify.${DOMAIN:-10.0.0.10.xip.io}
+      TZ: UTC
+
+      # FIXME: Create application in gotify and change the token, recreate watchtower.
+      WATCHTOWER_NOTIFICATION_GOTIFY_TOKEN: changeme
+
+##
+## Traefik
+##
+
+  traefik:
+    <<: *defaults
+    image: traefik:2.2
+    networks:
+      net-docker:
+      net-dmz:
+    ports:
+      - "80:80/tcp"
+      - "443:443/tcp"
+      - "2222:2222/tcp"
+      - "5487:5487/tcp"
+    volumes:
+      - /srv/traefik:/etc/traefik
+      - traefik_acme_data:/etc/traefik/acme
+    command:
+      - --api=true
+      #- --api.insecure=true
+      - --log.level=DEBUG
+      - --accesslog
+      # File provider
+      - --providers.file.directory=/etc/traefik
+      # Docker provider
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=net-dmz
+      - --providers.docker.endpoint=http://dockersocket:2375
+      - --providers.docker.defaultrule=host(`{{ (split `-` .Name)._0 }}.${DOMAIN:-10.0.0.10.xip.io}`)
+      # Listen to port 80 and redirect to 443
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      # Listen to port 443 with SSL
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.websecure.http.tls=true
+      - --entrypoints.websecure.http.tls.options=mintls13@file
+    #  - --entrypoints.websecure.http.tls.certresolver=letsencrypt
+      - --entrypoints.websecure.http.middlewares=default-headers
+      # Listen to port 2222
+      - --entrypoints.port2222.address=:2222
+      # Listen to port 5487 with SSL
+      - --entrypoints.registrysecure.address=:5487
+      - --entrypoints.registrysecure.http.tls=true
+      - --entrypoints.registrysecure.http.tls.options=mintls12@file
+    #  - --entrypoints.registrysecure.http.tls.certresolver=letsencrypt
+      - --entrypoints.registrysecure.http.middlewares=default-headers
+    #  # LetsEncrypt, enable and use prod api in production
+    #  - --certificatesresolvers.letsencrypt=true
+    #  - --certificatesresolvers.letsencrypt.acme.caserver=https://acme-v02.api.letsencrypt.org/directory
+    #  - --certificatesresolvers.letsencrypt.acme.email=${TRAEFIK_LETSENCRYPT_EMAIL:-me@foo.bar}
+    #  - --certificatesresolvers.letsencrypt.acme.storage=/etc/traefik/acme/letsencrypt.json
+    #  - --certificatesresolvers.letsencrypt.acme.tlschallenge=true
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.middlewares.private-ip-ranges.ipwhitelist.sourcerange=192.168.0.0/16,172.16.0.0/12,10.0.0.0/8"
+      - "traefik.http.middlewares.private-ip-ranges-no-docker.ipwhitelist.sourcerange=192.168.0.0/16,10.0.0.0/8"
+      - "traefik.http.middlewares.default-headers.headers.customFrameOptionsValue=SAMEORIGIN"
+      - "traefik.http.middlewares.default-headers.headers.framedeny=true"
+      - "traefik.http.middlewares.default-headers.headers.sslredirect=true"
+      - "traefik.http.middlewares.default-headers.headers.stsIncludeSubdomains=true"
+      - "traefik.http.middlewares.default-headers.headers.stsPreload=true"
+      - "traefik.http.middlewares.default-headers.headers.stsSeconds=15552000"
+      - "traefik.http.middlewares.default-headers.headers.referrerPolicy=same-origin"
+      - "traefik.http.services.traefik.loadbalancer.server.port=8080"
+      - "traefik.http.routers.traefik.service=api@internal"
+      - "traefik.http.routers.traefik.entrypoints=websecure"
+      - "traefik.http.routers.traefik.middlewares=private-ip-ranges-no-docker"
+
+  dockersocket:
+    <<: *defaults
+    image: tecnativa/docker-socket-proxy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      CONTAINERS: 1
+      NETWORKS: 1
+      SERVICES: 1
+      # SWARM: 1
+      TASKS: 1
+    networks:
+      net-docker:
+
+##
+## Docker for backup and cleanup jobs
+##
+
+  cron:
+    build:
+      context: .
+      dockerfile: Dockerfile.cron
+    image: docker.io/aheimsbakk/cron
+    environment:
+      NEXTCLOUD_MYSQL_PASSWORD: ${NEXTCLOUD_MYSQL_PASSWORD:-password}
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME}
+    volumes:
+      - ${BACKUP_PATH:-/var/backups}:/var/backups
+      - /var/run/docker.sock:/var/run/docker.sock
