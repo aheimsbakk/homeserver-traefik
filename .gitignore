@@ -7,7 +7,6 @@
 *.bak
 
 # Ignore own container customizations
-!docker-compose.override.yml
-!.env.template
 docker-compose.*.yml
 .env*
+!*.template
