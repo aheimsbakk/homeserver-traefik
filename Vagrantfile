@@ -19,7 +19,8 @@ Vagrant.configure("2") do |config|
   config.vm.provision "shell", inline: <<-SHELL
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
-    apt-get install -y docker.io docker-compose zram-config unattended-upgrades
+    apt-get install -y docker.io python3-pip zram-config unattended-upgrades
+    pip3 install docker-compose
   SHELL
 
   config.vm.provision "shell", "run": "always", inline: <<-SHELL
