@@ -1,5 +1,5 @@
 # Ingore development environment
-*log
+*.log
 .vagrant
 
 # Ignore temporary files

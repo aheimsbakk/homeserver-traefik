@@ -27,10 +27,10 @@ x-nc-web-volumes: &nc-web-volumes
   - nextcloud_data:/var/www/html/data
 
 networks:
-  net-dmz:
-  net-docker:
-  net-gitlab-runner:
-  net-nextcloud:
+  net_dmz:
+  net_docker:
+  net_gitlab_runner:
+  net_nextcloud:
 
 volumes:
   gitlab_backup:
@@ -65,13 +65,13 @@ services:
       MYSQL_ROOT_PASSWORD: password
       <<: *nc-mysql-defaults
     networks:
-      net-nextcloud:
+      net_nextcloud:
 
   nc_redis:
     <<: *defaults
     image: redis:alpine
     networks:
-      net-nextcloud:
+      net_nextcloud:
 
   nc_cron:
     <<: *defaults
@@ -81,7 +81,7 @@ services:
     depends_on:
       - futhark
     networks:
-      net-nextcloud:
+      net_nextcloud:
 
   futhark:
     <<: *defaults
@@ -101,8 +101,8 @@ services:
       - nc_db
       - nc_redis
     networks:
-      net-dmz:
-      net-nextcloud:
+      net_dmz:
+      net_nextcloud:
     labels:
       - "traefik.enable=true"
       - "traefik.http.middlewares.nextcloud-redirect.redirectregex.regex=^https://(.*)/.well-known/(card|cal)dav"
@@ -146,7 +146,7 @@ services:
           "X-Forwarded-Ssl" => "on"
         }
     networks:
-      net-dmz:
+      net_dmz:
     labels:
       - "traefik.enable=true"
       - "traefik.http.services.gitlab.loadbalancer.server.port=80"
@@ -172,7 +172,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - gitlab_runner_conf:/etc/gitlab-runner
     networks:
-      net-gitlab-runner:
+      net_gitlab_runner:
 
 ##
 ## Gotify
@@ -192,7 +192,7 @@ services:
       GOTIFY_PLUGINSDIR: /data/plugins
       GOTIFY_SERVER_RESPONSEHEADERS: "Access-Control-Allow-Origin: \"*\"\nAccess-Control-Allow-Methods: \"GET,POST\""
     networks:
-      net-dmz:
+      net_dmz:
     volumes:
       - gotify_data:/data
     labels:
@@ -216,7 +216,7 @@ services:
       NODES:
       SMTP_NODES:
     networks:
-      net-dmz:
+      net_dmz:
     labels:
       - "traefik.enable=true"
       - "traefik.http.middlewares.munin-redirect.redirectregex.regex=^(.+)://([^/]+)/$$"
@@ -253,8 +253,8 @@ services:
     <<: *defaults
     image: traefik:2.2
     networks:
-      net-docker:
-      net-dmz:
+      net_docker:
+      net_dmz:
     ports:
       - "80:80/tcp"
       - "443:443/tcp"
@@ -273,7 +273,7 @@ services:
       # Docker provider
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
-      - --providers.docker.network=net-dmz
+      - --providers.docker.network=${COMPOSE_PROJECT_NAME}_net_dmz
       - --providers.docker.endpoint=http://dockersocket:2375
       - --providers.docker.defaultrule=host(`{{ (split `-` .Name)._0 }}.${DOMAIN:-10.0.0.10.xip.io}`)
       # Listen to port 80 and redirect to 443
@@ -328,7 +328,7 @@ services:
       # SWARM: 1
       TASKS: 1
     networks:
-      net-docker:
+      net_docker:
 
 ##
 ## Docker for backup and cleanup jobs

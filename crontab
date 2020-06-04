@@ -14,10 +14,10 @@ PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 0 1 * * * docker system prune -a -f --filter until=48h --filter label!=prune=false
 
 # Do Gitlab garbage collection in registry
-0 2 * * 0 docker-compose -p "$COMPOSE_PROJECT_NAME" exec -T git gitlab-ctl registry-garbage-collect -m
+0 2 * * 0 docker-compose -p "${COMPOSE_PROJECT_NAME}" exec -T git gitlab-ctl registry-garbage-collect -m
 
 # Make Gitlab backup
-0 3 * * * docker-compose -p "$COMPOSE_PROJECT_NAME" exec -T git gitlab-rake gitlab:backup:create SKIP=registry
+0 3 * * * docker-compose -p "${COMPOSE_PROJECT_NAME}" exec -T git gitlab-rake gitlab:backup:create SKIP=registry
 
 # Make Nextcloud backup
-0 4 * * * docker-compose -p "$COMPOSE_PROJECT_NAME" exec -T nc_db sh -c "exec mysqldump --add-drop-table --user=nextcloud --password=${NEXTCLOUD_MYSQL_PASSWORD:-password} nextcloud" > /var/backups/nextcloud.sql; savelog -j -c 30 /var/backups/nextcloud.sql
+0 4 * * * docker-compose -p "${COMPOSE_PROJECT_NAME}" exec -T nc_db sh -c "exec mysqldump --add-drop-table --user=nextcloud --password='${NEXTCLOUD_MYSQL_PASSWORD:-password}' nextcloud" > /var/backups/nextcloud.sql; savelog -j -c 30 /var/backups/nextcloud.sql

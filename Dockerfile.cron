@@ -12,6 +12,7 @@ RUN apk add --no-cache \
 
 COPY crontab /etc/crontabs/root
 COPY docker-*.yml /root/
+COPY savelog /usr/bin/
 
 VOLUME /var/backups
 
