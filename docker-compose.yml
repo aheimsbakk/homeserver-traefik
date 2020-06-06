@@ -46,6 +46,7 @@ volumes:
   nextcloud_data:
   nextcloud_db:
   traefik_acme_data:
+  smokeping_data:
 
 services:
 
@@ -348,7 +349,7 @@ services:
       com.centurylinklabs.watchtower.enable: "true"
 
 ##
-## Docker for backup and cleanup jobs
+## Container for backup and cleanup jobs
 ##
 
   cron:
@@ -362,5 +363,23 @@ services:
     volumes:
       - ${BACKUP_PATH:-/var/backups}:/var/backups
       - /var/run/docker.sock:/var/run/docker.sock
+
+##
+## Smokeping
+##
+
+  smokeping:
+    image: docker.io/aheimsbakk/smokeping
+    volumes:
+      - /srv/smokeping:/etc/smokeping
+      - smokeping_data:/var/lib/smokeping
+    networks:
+      dmz:
     labels:
       com.centurylinklabs.watchtower.enable: "true"
+      # Traefik
+      traefik.enable: "true"
+      traefik.http.services.smokeping.loadbalancer.server.port: "80"
+      traefik.http.routers.smokeping.entrypoints: "websecure"
+      traefik.http.routers.smokeping.service: "smokeping"
+      traefik.http.routers.smokeping.middlewares: "private-ip-ranges-no-docker"
