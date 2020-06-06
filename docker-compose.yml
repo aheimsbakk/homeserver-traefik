@@ -224,7 +224,7 @@ services:
       - munin_plugin_conf:/etc/munin/plugin-conf.d
     environment:
       NODES:
-      SMTP_NODES:
+      SNMP_NODES:
     networks:
       dmz:
     labels:
