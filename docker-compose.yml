@@ -78,7 +78,7 @@ services:
 
   nc_cron:
     <<: *defaults
-    image: nextcloud:18-apache
+    image: nextcloud:19-apache
     volumes: *nc-web-volumes
     entrypoint: /cron.sh
     depends_on:
@@ -90,7 +90,7 @@ services:
 
   futhark:
     <<: *defaults
-    image: nextcloud:18-apache
+    image: nextcloud:19-apache
     volumes: *nc-web-volumes
     environment:
       <<: *nc-mysql-defaults
