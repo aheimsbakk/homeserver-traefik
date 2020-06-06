@@ -137,6 +137,7 @@ services:
         gitlab_rails['registry_host'] = "registry.${DOMAIN:-10.0.0.10.xip.io}"
         gitlab_rails['registry_port'] = "5487"
         gitlab_rails['registry_path'] = "/var/opt/gitlab/gitlab-rails/shared/registry"
+        gitlab_rails['backup_keep_time'] = 2592000
         registry_nginx['enable'] = true
         registry_nginx['proxy_set_headers'] = {
           "Host" => "$$http_host",
