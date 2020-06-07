@@ -65,16 +65,12 @@ services:
       <<: *nc-mysql-defaults
     networks:
       nextcloud:
-    labels:
-      com.centurylinklabs.watchtower.enable: "true"
 
   nc_redis:
     <<: *defaults
     image: redis:alpine
     networks:
       nextcloud:
-    labels:
-      com.centurylinklabs.watchtower.enable: "true"
 
   nc_cron:
     <<: *defaults
@@ -85,8 +81,6 @@ services:
       - futhark
     networks:
       nextcloud:
-    labels:
-      com.centurylinklabs.watchtower.enable: "true"
 
   futhark:
     <<: *defaults
@@ -109,8 +103,6 @@ services:
       dmz:
       nextcloud:
     labels:
-      com.centurylinklabs.watchtower.enable: "true"
-      # Traefik
       traefik.enable: "true"
       traefik.http.middlewares.nextcloud-redirect.redirectregex.regex: "^https://(.*)/.well-known/(card|cal)dav"
       traefik.http.middlewares.nextcloud-redirect.redirectregex.replacement: "https://$${1}/remote.php/dav/"
@@ -156,8 +148,6 @@ services:
     networks:
       dmz:
     labels:
-      com.centurylinklabs.watchtower.enable: "true"
-      # Traefik
       traefik.enable: "true"
       traefik.http.services.gitlab.loadbalancer.server.port: "80"
       traefik.http.routers.gitlab.entrypoints: "websecure"
@@ -206,10 +196,10 @@ services:
     volumes:
       - gotify_data:/data
     labels:
-      - "traefik.enable=true"
-      - "traefik.http.services.gotify.loadbalancer.server.port=80"
-      - "traefik.http.routers.gotify.entrypoints=websecure"
-      - "traefik.http.routers.gotify.service=gotify"
+      traefik.enable: "true"
+      traefik.http.services.gotify.loadbalancer.server.port: "80"
+      traefik.http.routers.gotify.entrypoints: "websecure"
+      traefik.http.routers.gotify.service: "gotify"
 
 ##
 ## Munin
@@ -225,11 +215,10 @@ services:
     environment:
       NODES:
       SNMP_NODES:
+      TZ: ${MUNIN_TZ:-UTC}
     networks:
       dmz:
     labels:
-      com.centurylinklabs.watchtower.enable: "true"
-      # Traefik
       traefik.enable: "true"
       traefik.http.middlewares.munin-redirect.redirectregex.regex: "^(.+)://([^/]+)/$$"
       traefik.http.middlewares.munin-redirect.redirectregex.replacement: "$${1}://$${2}/munin/"
@@ -245,7 +234,7 @@ services:
   watchtower:
     <<: *defaults
     image: containrrr/watchtower
-    command: -i 3600 --label-enable
+    command: -i 3600
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
@@ -255,9 +244,7 @@ services:
       TZ: ${WATCHTOWER_TZ:-UTC}
 
       # FIXME: Create application in gotify and change the token, recreate watchtower.
-      WATCHTOWER_NOTIFICATION_GOTIFY_TOKEN: changeme
-    labels:
-      com.centurylinklabs.watchtower.enable: "true"
+      WATCHTOWER_NOTIFICATION_GOTIFY_TOKEN: ${WATCHTOWER_NOTIFICATION_GOTIFY_TOKEN:-changeme}
 
 ##
 ## Traefik
@@ -315,8 +302,6 @@ services:
     #  - --certificatesresolvers.letsencrypt.acme.storage=/etc/traefik/acme/letsencrypt.json
     #  - --certificatesresolvers.letsencrypt.acme.tlschallenge=true
     labels:
-      com.centurylinklabs.watchtower.enable: "true"
-      # Traefik
       traefik.enable: "true"
       traefik.http.middlewares.private-ip-ranges.ipwhitelist.sourcerange: "192.168.0.0/16,172.16.0.0/12,10.0.0.0/8"
       traefik.http.middlewares.private-ip-ranges-no-docker.ipwhitelist.sourcerange: "192.168.0.0/16,10.0.0.0/8"
@@ -345,8 +330,6 @@ services:
       TASKS: 1
     networks:
       docker:
-    labels:
-      com.centurylinklabs.watchtower.enable: "true"
 
 ##
 ## Container for backup and cleanup jobs
@@ -375,9 +358,9 @@ services:
       - smokeping_data:/var/lib/smokeping
     networks:
       dmz:
+    environment:
+      TZ: ${SMOKEPING_TZ:-UTC}
     labels:
-      com.centurylinklabs.watchtower.enable: "true"
-      # Traefik
       traefik.enable: "true"
       traefik.http.services.smokeping.loadbalancer.server.port: "80"
       traefik.http.routers.smokeping.entrypoints: "websecure"
