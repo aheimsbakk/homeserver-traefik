@@ -215,6 +215,7 @@ services:
     environment:
       NODES:
       SNMP_NODES:
+      TZ: ${MUNIN_TZ:-UTC}
     networks:
       dmz:
     labels:
@@ -357,6 +358,8 @@ services:
       - smokeping_data:/var/lib/smokeping
     networks:
       dmz:
+    environment:
+      TZ: ${SMOKEPING_TZ:-UTC}
     labels:
       traefik.enable: "true"
       traefik.http.services.smokeping.loadbalancer.server.port: "80"
