@@ -21,7 +21,7 @@ x-nc-mysql-defaults: &nc-mysql-defaults
 x-nc-web-volumes: &nc-web-volumes
   - nextcloud_app:/var/www/html
   - nextcloud_custom_apps:/var/www/html/custom_apps
-  - nextcloud_config:/var/www/html/config
+  - /srv/nextcloud/config:/var/www/html/config
   - nextcloud_data:/var/www/html/data
 
 networks:
@@ -32,16 +32,11 @@ networks:
 
 volumes:
   gitlab_backup:
-  gitlab_config:
   gitlab_data:
   gitlab_logs:
-  gitlab_runner_conf:
   gotify_data:
-  munin_conf:
   munin_data:
-  munin_plugin_conf:
   nextcloud_app:
-  nextcloud_config:
   nextcloud_custom_apps:
   nextcloud_data:
   nextcloud_db:
@@ -77,8 +72,6 @@ services:
     image: nextcloud:19-apache
     volumes: *nc-web-volumes
     entrypoint: /cron.sh
-    depends_on:
-      - futhark
     networks:
       nextcloud:
 
@@ -96,9 +89,6 @@ services:
       NEXTCLOUD_TRUSTED_DOMAINS: "futhark.${DOMAIN:-10.0.0.10.xip.io}"
       TRUSTED_PROXIES: 172.16.0.0/12
       REDIS_HOST: nc_redis
-    depends_on:
-      - nc_db
-      - nc_redis
     networks:
       dmz:
       nextcloud:
@@ -120,7 +110,7 @@ services:
     <<: *defaults
     image: gitlab/gitlab-ce:latest
     volumes:
-      - gitlab_config:/etc/gitlab
+      - /srv/gitlab/config:/etc/gitlab
       - gitlab_logs:/var/log/gitlab
       - gitlab_data:/var/opt/gitlab
       - gitlab_backup:/var/opt/gitlab/backups
@@ -170,7 +160,7 @@ services:
     image: gitlab/gitlab-runner:latest
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - gitlab_runner_conf:/etc/gitlab-runner
+      - /srv/gitlab-runner:/etc/gitlab-runner
     networks:
       gitlab_runner:
 
@@ -210,8 +200,8 @@ services:
     image: aheimsbakk/munin-alpine
     volumes:
       - munin_data:/var/lib/munin
-      - munin_conf:/etc/munin/munin-conf.d
-      - munin_plugin_conf:/etc/munin/plugin-conf.d
+      - /srv/munin/conf:/etc/munin/munin-conf.d
+      - /srv/munin/plugin_conf:/etc/munin/plugin-conf.d
     environment:
       NODES:
       SNMP_NODES:
