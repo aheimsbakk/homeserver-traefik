@@ -21,7 +21,7 @@ x-nc-mysql-defaults: &nc-mysql-defaults
 x-nc-web-volumes: &nc-web-volumes
   - nextcloud_app:/var/www/html
   - nextcloud_custom_apps:/var/www/html/custom_apps
-  - nextcloud_config:/var/www/html/config
+  - /srv/nextcloud/config:/var/www/html/config
   - nextcloud_data:/var/www/html/data
 
 networks:
@@ -32,16 +32,11 @@ networks:
 
 volumes:
   gitlab_backup:
-  gitlab_config:
   gitlab_data:
   gitlab_logs:
-  gitlab_runner_conf:
   gotify_data:
-  munin_conf:
   munin_data:
-  munin_plugin_conf:
   nextcloud_app:
-  nextcloud_config:
   nextcloud_custom_apps:
   nextcloud_data:
   nextcloud_db:
@@ -49,202 +44,6 @@ volumes:
   smokeping_data:
 
 services:
-
-##
-## Nextcloud
-##
-
-  nc_db:
-    <<: *defaults
-    image: mariadb:10
-    command: --transaction-isolation=READ-COMMITTED --binlog-format=ROW
-    volumes:
-      - nextcloud_db:/var/lib/mysql
-    environment:
-      MYSQL_ROOT_PASSWORD: password
-      <<: *nc-mysql-defaults
-    networks:
-      nextcloud:
-
-  nc_redis:
-    <<: *defaults
-    image: redis:alpine
-    networks:
-      nextcloud:
-
-  nc_cron:
-    <<: *defaults
-    image: nextcloud:19-apache
-    volumes: *nc-web-volumes
-    entrypoint: /cron.sh
-    depends_on:
-      - futhark
-    networks:
-      nextcloud:
-
-  futhark:
-    <<: *defaults
-    image: nextcloud:19-apache
-    volumes: *nc-web-volumes
-    environment:
-      <<: *nc-mysql-defaults
-      NEXTCLOUD_ADMIN_PASSWORD: password
-      NEXTCLOUD_ADMIN_USER: admin
-      NEXTCLOUD_DATA_DIR: /var/www/html/data
-      NEXTCLOUD_TABLE_PREFIX: oc_
-      NEXTCLOUD_UPDATE: 1
-      NEXTCLOUD_TRUSTED_DOMAINS: "futhark.${DOMAIN:-10.0.0.10.xip.io}"
-      TRUSTED_PROXIES: 172.16.0.0/12
-      REDIS_HOST: nc_redis
-    depends_on:
-      - nc_db
-      - nc_redis
-    networks:
-      dmz:
-      nextcloud:
-    labels:
-      traefik.enable: "true"
-      traefik.http.middlewares.nextcloud-redirect.redirectregex.regex: "^https://(.*)/.well-known/(card|cal)dav"
-      traefik.http.middlewares.nextcloud-redirect.redirectregex.replacement: "https://$${1}/remote.php/dav/"
-      traefik.http.middlewares.nextcloud-redirect.redirectregex.permanent: "true"
-      traefik.http.services.nextcloud.loadbalancer.server.port: "80"
-      traefik.http.routers.nextcloud.entrypoints: "websecure"
-      traefik.http.routers.nextcloud.service: "nextcloud"
-      traefik.http.routers.nextcloud.middlewares: "nextcloud-redirect"
-
-##
-## Gitlab
-##
-
-  git:
-    <<: *defaults
-    image: gitlab/gitlab-ce:latest
-    volumes:
-      - gitlab_config:/etc/gitlab
-      - gitlab_logs:/var/log/gitlab
-      - gitlab_data:/var/opt/gitlab
-      - gitlab_backup:/var/opt/gitlab/backups
-    environment:
-      GITLAB_OMNIBUS_CONFIG: |
-        external_url "https://gitlab.${DOMAIN:-10.0.0.10.xip.io}"
-        registry_external_url "http://registry.${DOMAIN:-10.0.0.10.xip.io}:5487"
-        nginx['listen_https'] = false
-        nginx['listen_port'] = 80
-        gitlab_rails['time_zone'] = 'UTC'
-        gitlab_rails['gitlab_ssh_host'] = "gitlab.${DOMAIN:-10.0.0.10.xip.io}:2222"
-        gitlab_rails['registry_enabled'] = true
-        gitlab_rails['registry_host'] = "registry.${DOMAIN:-10.0.0.10.xip.io}"
-        gitlab_rails['registry_port'] = "5487"
-        gitlab_rails['registry_path'] = "/var/opt/gitlab/gitlab-rails/shared/registry"
-        gitlab_rails['backup_keep_time'] = 2592000
-        registry_nginx['enable'] = true
-        registry_nginx['proxy_set_headers'] = {
-          "Host" => "$$http_host",
-          "X-Real-IP" => "$$remote_addr",
-          "X-Forwarded-For" => "$$proxy_add_x_forwarded_for",
-          "X-Forwarded-Proto" => "https",
-          "X-Forwarded-Ssl" => "on"
-        }
-    networks:
-      dmz:
-    labels:
-      traefik.enable: "true"
-      traefik.http.services.gitlab.loadbalancer.server.port: "80"
-      traefik.http.routers.gitlab.entrypoints: "websecure"
-      traefik.http.routers.gitlab.service: "gitlab"
-      # Give registry it's own name
-      traefik.http.services.registry.loadbalancer.server.port: "5487"
-      traefik.http.routers.registry.rule: "Host(`registry.${DOMAIN:-10.0.0.10.xip.io}`)"
-      traefik.http.routers.registry.entrypoints: "registrysecure"
-      traefik.http.routers.registry.service: "registry"
-      # Proxy SSH
-      traefik.tcp.services.gitlab-ssh.loadbalancer.server.port: "22"
-      traefik.tcp.services.gitlab-ssh.loadbalancer.terminationdelay: "7200"
-      traefik.tcp.routers.gitlab-ssh.rule: "HostSNI(`*`)"
-      traefik.tcp.routers.gitlab-ssh.tls: "false"
-      traefik.tcp.routers.gitlab-ssh.entrypoints: "port2222"
-      traefik.tcp.routers.gitlab-ssh.service: "gitlab-ssh"
-
-  gitlab-runner:
-    <<: *defaults
-    image: gitlab/gitlab-runner:latest
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - gitlab_runner_conf:/etc/gitlab-runner
-    networks:
-      gitlab_runner:
-
-##
-## Gotify
-##
-
-  gotify:
-    <<: *defaults
-    image: gotify/server:2.0
-    environment:
-      GOTIFY_SERVER_PORT: '80'
-      GOTIFY_DATABASE_DIALECT: sqlite3
-      GOTIFY_DATABASE_CONNECTION: /data/gotify.db
-      GOTIFY_DEFAULTUSER_NAME: admin
-      GOTIFY_DEFAULTUSER_PASS: password
-      GOTIFY_PASSSTRENGTH: '16'
-      GOTIFY_UPLOADEDIMAGESDIR: /data/images
-      GOTIFY_PLUGINSDIR: /data/plugins
-      GOTIFY_SERVER_RESPONSEHEADERS: "Access-Control-Allow-Origin: \"*\"\nAccess-Control-Allow-Methods: \"GET,POST\""
-    networks:
-      dmz:
-    volumes:
-      - gotify_data:/data
-    labels:
-      traefik.enable: "true"
-      traefik.http.services.gotify.loadbalancer.server.port: "80"
-      traefik.http.routers.gotify.entrypoints: "websecure"
-      traefik.http.routers.gotify.service: "gotify"
-
-##
-## Munin
-##
-
-  munin:
-    <<: *defaults
-    image: aheimsbakk/munin-alpine
-    volumes:
-      - munin_data:/var/lib/munin
-      - munin_conf:/etc/munin/munin-conf.d
-      - munin_plugin_conf:/etc/munin/plugin-conf.d
-    environment:
-      NODES:
-      SNMP_NODES:
-      TZ: ${MUNIN_TZ:-UTC}
-    networks:
-      dmz:
-    labels:
-      traefik.enable: "true"
-      traefik.http.middlewares.munin-redirect.redirectregex.regex: "^(.+)://([^/]+)/$$"
-      traefik.http.middlewares.munin-redirect.redirectregex.replacement: "$${1}://$${2}/munin/"
-      traefik.http.services.munin.loadbalancer.server.port: "80"
-      traefik.http.routers.munin.entrypoints: "websecure"
-      traefik.http.routers.munin.service: "munin"
-      traefik.http.routers.munin.middlewares: "private-ip-ranges,munin-redirect"
-
-##
-## Watchtower
-##
-
-  watchtower:
-    <<: *defaults
-    image: containrrr/watchtower
-    command: -i 3600
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      # Notifications won't work until you have a valid certificate on gotify
-      WATCHTOWER_NOTIFICATIONS: gotify
-      WATCHTOWER_NOTIFICATION_GOTIFY_URL: https://gotify.${DOMAIN:-10.0.0.10.xip.io}
-      TZ: ${WATCHTOWER_TZ:-UTC}
-
-      # FIXME: Create application in gotify and change the token, recreate watchtower.
-      WATCHTOWER_NOTIFICATION_GOTIFY_TOKEN: ${WATCHTOWER_NOTIFICATION_GOTIFY_TOKEN:-changeme}
 
 ##
 ## Traefik
@@ -302,6 +101,8 @@ services:
     #  - --certificatesresolvers.letsencrypt.acme.storage=/etc/traefik/acme/letsencrypt.json
     #  - --certificatesresolvers.letsencrypt.acme.tlschallenge=true
     labels:
+      com.centurylinklabs.watchtower.enable: "true"
+      # Traefik
       traefik.enable: "true"
       traefik.http.middlewares.private-ip-ranges.ipwhitelist.sourcerange: "192.168.0.0/16,172.16.0.0/12,10.0.0.0/8"
       traefik.http.middlewares.private-ip-ranges-no-docker.ipwhitelist.sourcerange: "192.168.0.0/16,10.0.0.0/8"
@@ -330,6 +131,239 @@ services:
       TASKS: 1
     networks:
       docker:
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+
+##
+## Nextcloud
+##
+
+  nc_db:
+    <<: *defaults
+    image: mariadb:10
+    command: --transaction-isolation=READ-COMMITTED --binlog-format=ROW
+    volumes:
+      - nextcloud_db:/var/lib/mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      <<: *nc-mysql-defaults
+    networks:
+      nextcloud:
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+
+  nc_redis:
+    <<: *defaults
+    image: redis:alpine
+    networks:
+      nextcloud:
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+
+  nc_cron:
+    <<: *defaults
+    image: docker.io/nextcloud:19-apache
+    volumes: *nc-web-volumes
+    entrypoint: /cron.sh
+    networks:
+      nextcloud:
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+
+  futhark:
+    <<: *defaults
+    image: docker.io/nextcloud:19-apache
+    volumes: *nc-web-volumes
+    environment:
+      <<: *nc-mysql-defaults
+      NEXTCLOUD_ADMIN_PASSWORD: password
+      NEXTCLOUD_ADMIN_USER: admin
+      NEXTCLOUD_DATA_DIR: /var/www/html/data
+      NEXTCLOUD_TABLE_PREFIX: oc_
+      NEXTCLOUD_UPDATE: 1
+      NEXTCLOUD_TRUSTED_DOMAINS: "futhark.${DOMAIN:-10.0.0.10.xip.io}"
+      TRUSTED_PROXIES: 172.16.0.0/12
+      REDIS_HOST: nc_redis
+    networks:
+      dmz:
+      nextcloud:
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+      # Traefik
+      traefik.enable: "true"
+      traefik.http.middlewares.nextcloud-redirect.redirectregex.regex: "^https://(.*)/.well-known/(card|cal)dav"
+      traefik.http.middlewares.nextcloud-redirect.redirectregex.replacement: "https://$${1}/remote.php/dav/"
+      traefik.http.middlewares.nextcloud-redirect.redirectregex.permanent: "true"
+      traefik.http.services.nextcloud.loadbalancer.server.port: "80"
+      traefik.http.routers.nextcloud.entrypoints: "websecure"
+      traefik.http.routers.nextcloud.service: "nextcloud"
+      traefik.http.routers.nextcloud.middlewares: "nextcloud-redirect"
+
+##
+## Gitlab
+##
+
+  git:
+    <<: *defaults
+    image: gitlab/gitlab-ce:latest
+    volumes:
+      - /srv/gitlab/config:/etc/gitlab
+      - gitlab_logs:/var/log/gitlab
+      - gitlab_data:/var/opt/gitlab
+      - gitlab_backup:/var/opt/gitlab/backups
+    environment:
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url "https://gitlab.${DOMAIN:-10.0.0.10.xip.io}"
+        registry_external_url "http://registry.${DOMAIN:-10.0.0.10.xip.io}:5487"
+        nginx['listen_https'] = false
+        nginx['listen_port'] = 80
+        gitlab_rails['time_zone'] = 'UTC'
+        gitlab_rails['gitlab_ssh_host'] = "gitlab.${DOMAIN:-10.0.0.10.xip.io}:2222"
+        gitlab_rails['registry_enabled'] = true
+        gitlab_rails['registry_host'] = "registry.${DOMAIN:-10.0.0.10.xip.io}"
+        gitlab_rails['registry_port'] = "5487"
+        gitlab_rails['registry_path'] = "/var/opt/gitlab/gitlab-rails/shared/registry"
+        gitlab_rails['backup_keep_time'] = 2592000
+        registry_nginx['enable'] = true
+        registry_nginx['proxy_set_headers'] = {
+          "Host" => "$$http_host",
+          "X-Real-IP" => "$$remote_addr",
+          "X-Forwarded-For" => "$$proxy_add_x_forwarded_for",
+          "X-Forwarded-Proto" => "https",
+          "X-Forwarded-Ssl" => "on"
+        }
+    networks:
+      dmz:
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+      # Traefik
+      traefik.enable: "true"
+      traefik.http.services.gitlab.loadbalancer.server.port: "80"
+      traefik.http.routers.gitlab.entrypoints: "websecure"
+      traefik.http.routers.gitlab.service: "gitlab"
+      # Give registry it's own name
+      traefik.http.services.registry.loadbalancer.server.port: "5487"
+      traefik.http.routers.registry.rule: "Host(`registry.${DOMAIN:-10.0.0.10.xip.io}`)"
+      traefik.http.routers.registry.entrypoints: "registrysecure"
+      traefik.http.routers.registry.service: "registry"
+      # Proxy SSH
+      traefik.tcp.services.gitlab-ssh.loadbalancer.server.port: "22"
+      traefik.tcp.services.gitlab-ssh.loadbalancer.terminationdelay: "7200"
+      traefik.tcp.routers.gitlab-ssh.rule: "HostSNI(`*`)"
+      traefik.tcp.routers.gitlab-ssh.tls: "false"
+      traefik.tcp.routers.gitlab-ssh.entrypoints: "port2222"
+      traefik.tcp.routers.gitlab-ssh.service: "gitlab-ssh"
+
+  gitlab-runner:
+    <<: *defaults
+    image: gitlab/gitlab-runner:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /srv/gitlab-runner:/etc/gitlab-runner
+    networks:
+      gitlab_runner:
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+
+##
+## Gotify
+##
+
+  gotify:
+    <<: *defaults
+    image: gotify/server:2.0
+    environment:
+      GOTIFY_SERVER_PORT: '80'
+      GOTIFY_DATABASE_DIALECT: sqlite3
+      GOTIFY_DATABASE_CONNECTION: /data/gotify.db
+      GOTIFY_DEFAULTUSER_NAME: admin
+      GOTIFY_DEFAULTUSER_PASS: password
+      GOTIFY_PASSSTRENGTH: '16'
+      GOTIFY_UPLOADEDIMAGESDIR: /data/images
+      GOTIFY_PLUGINSDIR: /data/plugins
+      GOTIFY_SERVER_RESPONSEHEADERS: "Access-Control-Allow-Origin: \"*\"\nAccess-Control-Allow-Methods: \"GET,POST\""
+    networks:
+      dmz:
+    volumes:
+      - gotify_data:/data
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+      # Traefik
+      traefik.enable: "true"
+      traefik.http.services.gotify.loadbalancer.server.port: "80"
+      traefik.http.routers.gotify.entrypoints: "websecure"
+      traefik.http.routers.gotify.service: "gotify"
+
+##
+## Munin
+##
+
+  munin:
+    <<: *defaults
+    image: aheimsbakk/munin-alpine
+    volumes:
+      - munin_data:/var/lib/munin
+      - /srv/munin/conf:/etc/munin/munin-conf.d
+      - /srv/munin/plugin_conf:/etc/munin/plugin-conf.d
+    environment:
+      NODES:
+      SNMP_NODES:
+      TZ: ${MUNIN_TZ:-UTC}
+    networks:
+      dmz:
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+      # Traefik
+      traefik.enable: "true"
+      traefik.http.middlewares.munin-redirect.redirectregex.regex: "^(.+)://([^/]+)/$$"
+      traefik.http.middlewares.munin-redirect.redirectregex.replacement: "$${1}://$${2}/munin/"
+      traefik.http.services.munin.loadbalancer.server.port: "80"
+      traefik.http.routers.munin.entrypoints: "websecure"
+      traefik.http.routers.munin.service: "munin"
+      traefik.http.routers.munin.middlewares: "private-ip-ranges,munin-redirect"
+
+##
+## Smokeping
+##
+
+  smokeping:
+    image: docker.io/aheimsbakk/smokeping
+    volumes:
+      - /srv/smokeping:/etc/smokeping
+      - smokeping_data:/var/lib/smokeping
+    networks:
+      dmz:
+    environment:
+      TZ: ${SMOKEPING_TZ:-UTC}
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+      # Traefik
+      traefik.enable: "true"
+      traefik.http.services.smokeping.loadbalancer.server.port: "80"
+      traefik.http.routers.smokeping.entrypoints: "websecure"
+      traefik.http.routers.smokeping.service: "smokeping"
+      traefik.http.routers.smokeping.middlewares: "private-ip-ranges-no-docker"
+
+##
+## Watchtower
+##
+
+  watchtower:
+    <<: *defaults
+    image: containrrr/watchtower
+    command: -i 3600 -e -t 60s
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      # Notifications won't work until you have a valid certificate on gotify
+      WATCHTOWER_NOTIFICATIONS: gotify
+      WATCHTOWER_NOTIFICATION_GOTIFY_URL: https://gotify.${DOMAIN:-10.0.0.10.xip.io}
+      TZ: ${WATCHTOWER_TZ:-UTC}
+
+      # FIXME: Create application in gotify and change the token, recreate watchtower.
+      WATCHTOWER_NOTIFICATION_GOTIFY_TOKEN: ${WATCHTOWER_NOTIFICATION_GOTIFY_TOKEN:-changeme}
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
 
 ##
 ## Container for backup and cleanup jobs
@@ -347,22 +381,3 @@ services:
       - ${BACKUP_PATH:-/var/backups}:/var/backups
       - /var/run/docker.sock:/var/run/docker.sock
 
-##
-## Smokeping
-##
-
-  smokeping:
-    image: docker.io/aheimsbakk/smokeping
-    volumes:
-      - /srv/smokeping:/etc/smokeping
-      - smokeping_data:/var/lib/smokeping
-    networks:
-      dmz:
-    environment:
-      TZ: ${SMOKEPING_TZ:-UTC}
-    labels:
-      traefik.enable: "true"
-      traefik.http.services.smokeping.loadbalancer.server.port: "80"
-      traefik.http.routers.smokeping.entrypoints: "websecure"
-      traefik.http.routers.smokeping.service: "smokeping"
-      traefik.http.routers.smokeping.middlewares: "private-ip-ranges-no-docker"
