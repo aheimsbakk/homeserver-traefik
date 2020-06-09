@@ -351,7 +351,7 @@ services:
   watchtower:
     <<: *defaults
     image: containrrr/watchtower
-    command: -i 3600 -e -t 60
+    command: -i 3600 -e -t 60s
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
