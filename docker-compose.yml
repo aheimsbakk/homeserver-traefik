@@ -327,6 +327,7 @@ services:
 ##
 
   smokeping:
+    <<: *defaults
     image: docker.io/aheimsbakk/smokeping
     volumes:
       - /srv/smokeping:/etc/smokeping
